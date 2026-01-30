@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """
-XBLBSMA - Xiaomi BootLoader BullShit My Ass
-Premium Terminal Interface
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║   XBLBSMA - Xiaomi BootLoader BullShit My Ass                                 ║
+║   Premium Terminal Interface                                                   ║
+║   "Engineering spite into bootloader freedom since 2026"                      ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
 """
 
-__version__ = "2.0.0"
+__version__ = "1.0.0"
 __author__ = "sterlix"
 
 import os
@@ -91,6 +94,7 @@ class Config:
     """Configuration manager."""
     def __init__(self):
         self.tokens = {}
+        self.device = {}
         self._load()
     
     def _load(self):
@@ -98,15 +102,19 @@ class Config:
             with open(TOKENS_FILE) as f:
                 data = json.load(f)
                 self.tokens = data.get("authentication", {})
+                self.device = data.get("device", {})
     
     def get_headers(self):
         token = self.tokens.get("new_bbs_serviceToken", "")
-        device = self.tokens.get("deviceId", "")
         csrf = self.tokens.get("x-csrf-token", "")
+        # Check device section first (preferred), fallback to authentication for legacy configs
+        device_id = self.device.get("deviceId", "") or self.tokens.get("deviceId", "")
+        version_code = self.device.get("versionCode", "500429")
+        version_name = self.device.get("versionName", "5.4.29")
         
         headers = {
             "Host": "sgp-api.buy.mi.com",
-            "Cookie": f"new_bbs_serviceToken={token};versionCode=500429;versionName=5.4.29;deviceId={device};",
+            "Cookie": f"new_bbs_serviceToken={token};versionCode={version_code};versionName={version_name};deviceId={device_id};",
             "Accept": "application/json",
             "Content-Type": "application/json",
             "User-Agent": "okhttp/4.12.0"
@@ -307,12 +315,10 @@ class Dashboard:
             center.append("○ ", style=theme.ERROR)
             center.append("Token Missing", style=theme.TEXT_SECONDARY)
         
-        # Right: Input prompt
+        # Right: Version info
         right = Text()
-        right.append("Select ", style=theme.TEXT_DIM)
-        right.append("[", style=theme.ORANGE)
-        right.append("▌", style=f"bold {theme.TEXT_PRIMARY} blink")
-        right.append("]", style=theme.ORANGE)
+        right.append("v", style=theme.TEXT_DIM)
+        right.append(__version__, style=theme.ORANGE)
         
         # Build table for layout
         table = Table(show_header=False, box=None, expand=True, padding=0)
@@ -434,9 +440,8 @@ def render_farmer_dashboard(stats: dict, limits: dict, elapsed: float, status: s
     # Progress bars for each action type
     actions = [
         ("❤️ Likes", 'likes', theme.ERROR),
-        ("💬 Comments", 'comments', theme.BLUE),
+        ("💬 Comments", 'comments', theme.ORANGE),
         ("🔄 Shares", 'shares', theme.WARNING),
-        ("📝 Posts", 'posts', theme.SUCCESS),
     ]
     
     for label, key, color in actions:
@@ -741,8 +746,8 @@ def run_farmer(console: Console, hours: int = 24):
     session = requests.Session()
     session.headers.update(headers)
     
-    # Daily limits
-    limits = {'likes': 5, 'comments': 5, 'shares': 3, 'posts': 5}
+    # Daily limits (posts removed - farmer doesn't create posts)
+    limits = {'likes': 5, 'comments': 5, 'shares': 3}
     stats = {'likes': 0, 'comments': 0, 'shares': 0, 'posts': 0, 'tasks': 0, 'errors': 0}
     stop_event = threading.Event()
     last_action = ""
@@ -783,7 +788,7 @@ def run_farmer(console: Console, hours: int = 24):
         if stats['likes'] >= limits['likes']:
             return False
         try:
-            time.sleep(random.uniform(1, 3))
+            time.sleep(random.uniform(0.5, 1))
             resp = session.post(f"{BASE_URL}/action/like", json={"aid": int(aid), "action": True})
             if resp.status_code == 200:
                 stats['likes'] += 1
@@ -799,7 +804,7 @@ def run_farmer(console: Console, hours: int = 24):
             return False
         try:
             text = random.choice(COMMENTS)
-            time.sleep(random.uniform(2, 5))
+            time.sleep(random.uniform(0.5, 1.5))
             resp = session.post(f"{BASE_URL}/comment/add", json={"text": text, "aid": int(aid)})
             if resp.status_code == 200:
                 stats['comments'] += 1
@@ -877,9 +882,9 @@ def run_farmer(console: Console, hours: int = 24):
                         finish_task(4)
                 
                 # Human-like delay
-                time.sleep(random.uniform(5, 15))
+                time.sleep(random.uniform(1, 3))
             
-            time.sleep(30)  # Batch delay
+            time.sleep(5)  # Batch delay
     
     # Start farm thread
     farm_thread = threading.Thread(target=farm_loop, daemon=True)
@@ -1071,12 +1076,16 @@ def run_setup_wizard(console: Console) -> bool:
         Prompt.ask(f"[{theme.TEXT_DIM}]Press Enter to continue without setup[/]")
         return False
     
-    # Build config structure
+    # Build config structure (matches TOKENS_BACKUP.example.json schema)
     config_data = {
         "authentication": {
             "new_bbs_serviceToken": service_token,
-            "deviceId": device_id,
             "x-csrf-token": csrf_token,
+        },
+        "device": {
+            "deviceId": device_id,
+            "versionCode": "500429",
+            "versionName": "5.4.29"
         },
         "api": {
             "base_url": "https://sgp-api.buy.mi.com/bbs/api/global",
@@ -1209,7 +1218,7 @@ def main():
                     console.print(f"[{theme.TEXT_SECONDARY}][1] Verify Prerequisites[/]")
                     console.print(f"[{theme.TEXT_SECONDARY}][2] Backup Device[/]")
                     console.print(f"[{theme.WARNING}][3] UNLOCK Bootloader[/]")
-                    console.print(f"[{theme.TEXT_SECONDARY}][4] Flash TWRP + EvolutionX[/]")
+                    console.print(f"[{theme.TEXT_SECONDARY}][4] Flash TWRP + Custom ROM[/]")
                     console.print(f"[{theme.SUCCESS}][5] Full Sequence (backup → unlock → flash)[/]")
                     console.print(f"[{theme.TEXT_SECONDARY}][6] Post-flash Setup[/]")
                     console.print(f"[{theme.TEXT_DIM}][0] Back[/]\n")

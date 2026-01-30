@@ -14,7 +14,7 @@ from pathlib import Path
 
 # ================= CONFIGURATION =================
 SCRIPT_DIR = Path(__file__).parent.absolute()
-TOKENS_FILE = SCRIPT_DIR / "TOKENS_BACKUP.json"
+TOKENS_FILE = SCRIPT_DIR.parent / "TOKENS_BACKUP.json"  # In repo root, not src/
 BASE_URL = "https://sgp-api.buy.mi.com/bbs/api/global"
 
 def load_headers():
@@ -96,6 +96,11 @@ def print_colored(text, color):
 
 class GhostFarmer:
     def __init__(self):
+        if HEADERS is None:
+            print_colored("❌ Cannot start farmer - tokens not configured!", Colors.RED)
+            print("   Copy TOKENS_BACKUP.example.json to TOKENS_BACKUP.json and fill in your tokens.")
+            raise SystemExit(1)
+        
         self.session = requests.Session()
         self.session.headers.update(HEADERS)
         # Daily Caps (approximate based on research)

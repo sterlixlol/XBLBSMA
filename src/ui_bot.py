@@ -216,10 +216,17 @@ class UINavigator:
         # 1. Dump UI
         run_adb_command("shell uiautomator dump /sdcard/window_dump.xml", silent=True)
         
-        # 2. Pull XML
+        # 2. Pull XML and fix permissions
         local_xml = os.path.join(os.getcwd(), "window_dump.xml")
         if run_adb_command(f"pull /sdcard/window_dump.xml {local_xml}", silent=True) == "ERROR":
              return []
+        
+        # Fix permissions: change owner from root to current user
+        try:
+            user = os.environ.get('USER', 'sterlix')
+            subprocess.run(f"sudo chown {user}:{user} {local_xml}", shell=True, check=False, capture_output=True)
+        except Exception:
+            pass  # Best effort
 
         # 3. Parse XML
         targets = []

@@ -13,7 +13,7 @@ from pathlib import Path
 
 # ================= CONFIGURATION =================
 SCRIPT_DIR = Path(__file__).parent.absolute()
-TOKENS_FILE = SCRIPT_DIR / "TOKENS_BACKUP.json"
+TOKENS_FILE = SCRIPT_DIR.parent / "TOKENS_BACKUP.json"  # In repo root, not src/
 API_URL = "https://sgp-api.buy.mi.com/bbs/api/global/apply/bl-auth"
 
 def load_headers():
@@ -69,6 +69,11 @@ def print_colored(text, color):
 
 def send_request(thread_id, stop_event, stats):
     """Worker function to spam the API."""
+    if HEADERS is None:
+        print_colored("❌ Cannot start attack - tokens not configured!", Colors.RED)
+        stop_event.set()
+        return
+    
     session = requests.Session()
     session.headers.update(HEADERS)
     

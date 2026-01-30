@@ -10,7 +10,7 @@ from pathlib import Path
 
 # ================= CONFIGURATION =================
 SCRIPT_DIR = Path(__file__).parent.absolute()
-TOKENS_FILE = SCRIPT_DIR / "TOKENS_BACKUP.json"
+TOKENS_FILE = SCRIPT_DIR.parent / "TOKENS_BACKUP.json"  # In repo root, not src/
 BASE_URL = "https://sgp-api.buy.mi.com/bbs/api/global"
 
 def load_headers():

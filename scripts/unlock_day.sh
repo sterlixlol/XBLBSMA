@@ -15,7 +15,7 @@
 #    ./unlock_day.sh --verify     # Check if everything is ready
 #    ./unlock_day.sh --backup     # Backup device before unlock
 #    ./unlock_day.sh --unlock     # UNLOCK BOOTLOADER (irreversible!)
-#    ./unlock_day.sh --flash      # Flash TWRP + EvolutionX + Magisk
+#    ./unlock_day.sh --flash      # Flash TWRP + Custom ROM + Magisk
 #    ./unlock_day.sh --full       # Full sequence (backup -> unlock -> flash)
 #
 #  Author: sterlix (with spite-driven motivation)
@@ -28,14 +28,15 @@ set -e  # Exit on error
 # CONFIGURATION
 # ============================================================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-XIAOMI_DIR="$SCRIPT_DIR/xiaomi"
-BACKUP_DIR="$SCRIPT_DIR/backups/$(date +%Y%m%d_%H%M%S)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"  # Parent of scripts/ is repo root
+XIAOMI_DIR="$REPO_ROOT/xiaomi"
+BACKUP_DIR="$REPO_ROOT/backups/$(date +%Y%m%d_%H%M%S)"
 ADB_PATH="$HOME/Downloads/platform-tools/adb"
 FASTBOOT_PATH="$HOME/Downloads/platform-tools/fastboot"
 
 # Files
 TWRP_IMG="$XIAOMI_DIR/twrp/twrp_3.7.1_xun.img"
-EVOLUTION_ZIP="$XIAOMI_DIR/evolutionx/EvolutionX-14.0-20240715-xun-v9.2-Unofficial.zip"
+CUSTOM_ROM_ZIP="$XIAOMI_DIR/rom/custom_rom.zip"  # Place your ROM here
 MAGISK_APK="$XIAOMI_DIR/magisk/Magisk-v30.6.apk"
 OVERCLOCK_APK="$XIAOMI_DIR/overclock/app-release.apk"
 
@@ -59,13 +60,9 @@ BOLD='\033[1m'
 
 print_banner() {
     echo -e "${RED}"
-    echo "╔═══════════════════════════════════════════════════════════════════╗"
-    echo "║                                                                   ║"
-    echo "║   ⚔️   OPERATION SPITE - BOOTLOADER UNLOCK SCRIPT   ⚔️            ║"
-    echo "║                                                                   ║"
-    echo "║   \"Never underestimate a developer with spite and Python\"        ║"
-    echo "║                                                                   ║"
-    echo "╚═══════════════════════════════════════════════════════════════════╝"
+    echo "╔══════════════════════════════════════════════════╗"
+    echo "║  ⚔️  OPERATION SPITE - BOOTLOADER UNLOCK  ⚔️       ║"
+    echo "╚══════════════════════════════════════════════════╝"
     echo -e "${NC}"
 }
 
@@ -165,12 +162,12 @@ verify_prerequisites() {
         all_good=false
     fi
     
-    # Check EvolutionX
-    if [ -f "$EVOLUTION_ZIP" ]; then
-        local size=$(du -h "$EVOLUTION_ZIP" | cut -f1)
-        print_success "EvolutionX ROM found ($size)"
+    # Check Custom ROM
+    if [ -f "$CUSTOM_ROM_ZIP" ]; then
+        local size=$(du -h "$CUSTOM_ROM_ZIP" | cut -f1)
+        print_success "Custom ROM found ($size)"
     else
-        print_error "EvolutionX not found: $EVOLUTION_ZIP"
+        print_warning "Custom ROM not found: $CUSTOM_ROM_ZIP"
         all_good=false
     fi
     
@@ -388,12 +385,12 @@ flash_recovery() {
 }
 
 flash_rom() {
-    print_step "📱 FLASHING EVOLUTIONX ROM"
+    print_step "📱 FLASHING CUSTOM ROM"
     
-    print_info "Pushing EvolutionX to device..."
+    print_info "Pushing Custom ROM to device..."
     print_warning "This is a 2.1GB file - please be patient..."
     
-    sudo $ADB_PATH push "$EVOLUTION_ZIP" /sdcard/
+    sudo $ADB_PATH push "$CUSTOM_ROM_ZIP" /sdcard/
     
     print_success "ROM pushed to device!"
     
@@ -404,7 +401,7 @@ flash_rom() {
     echo "  3. Check: Dalvik/ART Cache, System, Data, Cache"
     echo "  4. Swipe to wipe"
     echo "  5. Go back, then 'Install'"
-    echo "  6. Select 'EvolutionX-14.0-20240715-xun-v9.2-Unofficial.zip'"
+    echo "  6. Select your Custom ROM zip file"
     echo "  7. Swipe to flash"
     
     read -p "Press Enter after flashing the ROM..."
@@ -457,7 +454,6 @@ push_extras() {
 # ============================================================================
 
 full_sequence() {
-    print_banner
     
     echo -e "${PURPLE}${BOLD}"
     echo "🚀 FULL UNLOCK & FLASH SEQUENCE"
@@ -468,7 +464,7 @@ full_sequence() {
     echo "  2. Backup device data"
     echo "  3. Unlock bootloader (DATA WIPE!)"
     echo "  4. Flash TWRP recovery"
-    echo "  5. Flash EvolutionX ROM"
+    echo "  5. Flash Custom ROM"
     echo "  6. Install Magisk (root)"
     echo "  7. Push extras (overclock tool)"
     echo -e "${NC}"
@@ -500,7 +496,7 @@ full_sequence() {
     echo "║   🎉  CONGRATULATIONS!  🎉                                        ║"
     echo "║                                                                   ║"
     echo "║   Your Xiaomi Pad 6 is now running:                               ║"
-    echo "║   • EvolutionX 14.0 v9.2                                          ║"
+    echo "║   • Custom ROM                                                    ║"
     echo "║   • TWRP Recovery 3.7.1                                           ║"
     echo "║   • Magisk v30.6 (root)                                           ║"
     echo "║                                                                   ║"
@@ -574,7 +570,7 @@ case "${1:-}" in
         echo "  --verify, -v    Verify all prerequisites and ticket status"
         echo "  --backup, -b    Backup device data before unlock"
         echo "  --unlock, -u    UNLOCK BOOTLOADER (irreversible, data wipe!)"
-        echo "  --flash,  -f    Flash TWRP + EvolutionX + Magisk"
+        echo "  --flash,  -f    Flash TWRP + Custom ROM + Magisk"
         echo "  --full          Complete sequence (backup → unlock → flash)"
         echo "  --post          Post-flash setup (install apps)"
         echo "  --help,  -h     Show this help message"
