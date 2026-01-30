@@ -1,0 +1,46 @@
+# 🔐 Sensitive Files - NEVER COMMIT THESE
+TOKENS_BACKUP.json
+TOKENS_BACKUP.txt
+tokens.json
+*.token
+*.secret
+GEMINI.md
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# APK files (large binary files)
+*.apk
+
+# Screenshots and dumps
+*.png
+*.xml
+!templates/*.xml
+
+# Logs
+logs/
+*.log
+
+# IDE/Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Virtual environment
+venv/
+.env
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# ROM/Recovery files (too large for git)
+xiaomi/
+
+# Device backups
+backups/
