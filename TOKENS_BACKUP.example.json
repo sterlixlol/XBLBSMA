@@ -1,0 +1,29 @@
+{
+    "_README": "🔐 XIAOMI ACCOUNT TOKENS - Copy this to TOKENS_BACKUP.json and fill in your values!",
+    "_INSTRUCTIONS": "See MITM_AND_API_GUIDE.md for how to extract these tokens",
+    "authentication": {
+        "new_bbs_serviceToken": "YOUR_SERVICE_TOKEN_HERE",
+        "x-csrf-token": "YOUR_CSRF_TOKEN_HERE"
+    },
+    "device": {
+        "deviceId": "YOUR_DEVICE_ID_HERE",
+        "versionCode": "500429",
+        "versionName": "5.4.29"
+    },
+    "api": {
+        "base_url": "https://sgp-api.buy.mi.com/bbs/api/global",
+        "unlock_endpoint": "https://sgp-api.buy.mi.com/bbs/api/global/apply/bl-auth"
+    },
+    "engagement_limits": {
+        "daily_likes": 5,
+        "daily_comments": 5,
+        "daily_shares": 3,
+        "daily_posts": 5
+    },
+    "attack_config": {
+        "threads": 100,
+        "duration_seconds": 10,
+        "request_delay_ms": 1,
+        "pre_launch_buffer_seconds": 1.5
+    }
+}
