@@ -218,9 +218,9 @@ verify_ticket() {
     
     print_info "Checking ticket status via API..."
     
-    # Use the check_stats.py or similar to verify
-    if [ -f "$SCRIPT_DIR/check_stats.py" ]; then
-        python3 "$SCRIPT_DIR/check_stats.py"
+    # Use the stats script to verify
+    if [ -f "$REPO_ROOT/src/stats.py" ]; then
+        python3 "$REPO_ROOT/src/stats.py"
     fi
     
     echo ""
