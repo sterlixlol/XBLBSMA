@@ -36,7 +36,7 @@ FASTBOOT_PATH="$HOME/Downloads/platform-tools/fastboot"
 
 # Files
 TWRP_IMG="$XIAOMI_DIR/twrp/twrp_3.7.1_xun.img"
-CUSTOM_ROM_ZIP="$XIAOMI_DIR/rom/custom_rom.zip"  # Place your ROM here
+CUSTOM_ROM_ZIP="$XIAOMI_DIR/evolutionx/EvolutionX-14.0-20240715-xun-v9.2-Unofficial.zip"  # Place your ROM here
 MAGISK_APK="$XIAOMI_DIR/magisk/Magisk-v30.6.apk"
 OVERCLOCK_APK="$XIAOMI_DIR/overclock/app-release.apk"
 
