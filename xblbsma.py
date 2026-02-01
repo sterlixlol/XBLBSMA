@@ -390,6 +390,8 @@ def render_attack_dashboard(stats: dict, elapsed: float, status: str = "WAITING"
     table.add_row("Code 0 (Success)", Text(str(stats.get('code_0', 0)), style=theme.SUCCESS))
     table.add_row("Code 3 (Full)", Text(str(stats.get('code_3', 0)), style=theme.WARNING))
     table.add_row("Code 6 (Retry)", Text(str(stats.get('code_6', 0)), style=theme.TEXT_SECONDARY))
+    if stats.get('rate_limited', 0) > 0:
+        table.add_row("Rate Limited", Text(str(stats['rate_limited']), style=theme.ERROR))
     table.add_row("Errors", Text(str(stats.get('errors', 0)), style=theme.ERROR))
     
     # Progress bar for requests
@@ -522,9 +524,119 @@ def render_ui_bot_dashboard(stats: dict, elapsed: float, status: str = "RUNNING"
 
 # Core functions
 
+def send_notification(title: str, message: str, icon: str = "dialog-information"):
+    """Send desktop notification using notify-send (Linux) or osascript (macOS)."""
+    try:
+        if os.name == 'posix':
+            # Try notify-send first (Linux)
+            result = os.system(f'notify-send "{title}" "{message}" --icon={icon} 2>/dev/null')
+            if result != 0:
+                # Fallback to osascript (macOS)
+                os.system(f'osascript -e \'display notification "{message}" with title "{title}"\' 2>/dev/null')
+    except:
+        pass
+
+def save_unlock_ticket(winner_data: dict, stats: dict, elapsed: float):
+    """Save unlock ticket to file for safekeeping."""
+    ticket_file = SCRIPT_DIR / "unlock_ticket.json"
+    
+    ticket = {
+        "timestamp": datetime.now().isoformat(),
+        "elapsed_seconds": round(elapsed, 3),
+        "total_requests": stats['total'],
+        "deadline_timestamp": winner_data.get('data', {}).get('deadline'),
+        "deadline_formatted": winner_data.get('data', {}).get('deadline_format'),
+        "raw_response": winner_data
+    }
+    
+    try:
+        with open(ticket_file, 'w') as f:
+            json.dump(ticket, f, indent=2)
+        return True
+    except Exception as e:
+        return False
+
+def check_existing_unlock(console: Console) -> bool:
+    """Check if user already has an active unlock slot."""
+    import requests
+    
+    if not config.is_configured():
+        return False
+    
+    try:
+        # Try to fetch current unlock status
+        url = "https://sgp-api.buy.mi.com/bbs/api/global/user/data"
+        resp = requests.get(url, headers=config.get_headers(), timeout=10)
+        
+        if resp.status_code == 200:
+            data = resp.json()
+            # Check if we can find unlock-related data
+            user_data = data.get('data', {})
+            # Some APIs return unlock status here
+            if user_data.get('bl_unlock_deadline') or user_data.get('unlock_deadline'):
+                return True
+    except:
+        pass
+    
+    return False
+
+def health_check(console: Console) -> bool:
+    """Quick health check before attack to validate tokens and API reachability."""
+    import requests
+    
+    console.print(f"\n[{theme.TEXT_SECONDARY}]Running pre-attack health check...[/]")
+    
+    if not config.is_configured():
+        console.print(f"[{theme.ERROR}]❌ Tokens not configured![/]")
+        return False
+    
+    # Test API reachability with a lightweight endpoint
+    try:
+        url = "https://sgp-api.buy.mi.com/bbs/api/global/user/data"
+        resp = requests.get(url, headers=config.get_headers(), timeout=5)
+        
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get('code') == 0:
+                user = data.get('data', {})
+                username = user.get('user_name', 'Unknown')
+                console.print(f"[{theme.SUCCESS}]✓ Token valid - User: {username}[/]")
+                return True
+            elif data.get('code') == 100004:
+                console.print(f"[{theme.ERROR}]❌ Token expired! Re-extract via mitmproxy.[/]")
+                return False
+            else:
+                console.print(f"[{theme.WARNING}]⚠ API responded: {data.get('msg', 'Unknown')}[/]")
+                return True  # Continue anyway
+        elif resp.status_code == 401:
+            console.print(f"[{theme.ERROR}]❌ Authentication failed - Token expired![/]")
+            return False
+        else:
+            console.print(f"[{theme.WARNING}]⚠ API returned HTTP {resp.status_code}[/]")
+            return True  # Continue anyway
+            
+    except requests.exceptions.Timeout:
+        console.print(f"[{theme.WARNING}]⚠ API health check timed out - will proceed anyway[/]")
+        return True
+    except Exception as e:
+        console.print(f"[{theme.WARNING}]⚠ Health check failed: {e} - will proceed anyway[/]")
+        return True
+
 def run_attack(console: Console, target_hour: int = 17, threads: int = 100, immediate: bool = False):
     """Run the API attack with live dashboard."""
     import requests
+    import random
+    import logging
+    
+    # Setup logging
+    log_file = SCRIPT_DIR / "attack.log"
+    logging.basicConfig(
+        filename=log_file,
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
+    logger = logging.getLogger(__name__)
+    
     clear_screen()
     
     API_URL = "https://sgp-api.buy.mi.com/bbs/api/global/apply/bl-auth"
@@ -536,11 +648,24 @@ def run_attack(console: Console, target_hour: int = 17, threads: int = 100, imme
         ))
         return
     
+    # Health check before attack
+    if not health_check(console):
+        Prompt.ask(f"\n[{theme.TEXT_DIM}]Press Enter to return to menu...[/]")
+        return
+    
+    # Check for existing unlock slot
+    if check_existing_unlock(console):
+        console.print(f"\n[{theme.WARNING}]⚠ You may already have an active unlock slot![/]")
+        console.print(f"[{theme.TEXT_DIM}]Check your account status before proceeding.[/]")
+        if not Confirm.ask(f"[{theme.ORANGE}]Continue with attack anyway?[/]", default=False):
+            return
+    
     headers = config.get_headers()
+    logger.info(f"Attack starting - Target hour: {target_hour}, Threads: {threads}")
     
     # State
     stop_event = threading.Event()
-    stats = {'total': 0, 'code_0': 0, 'code_3': 0, 'code_6': 0, 'errors': 0, 'winner': None}
+    stats = {'total': 0, 'code_0': 0, 'code_3': 0, 'code_6': 0, 'errors': 0, 'rate_limited': 0, 'winner': None}
     stats_lock = threading.Lock()
     
     def send_request(thread_id):
@@ -548,13 +673,27 @@ def run_attack(console: Console, target_hour: int = 17, threads: int = 100, imme
         session.headers.update(headers)
         payload = {"is_retry": False}
         
+        # Random initial delay to stagger thread starts
+        time.sleep(random.uniform(0, 0.1))
+        
         while not stop_event.is_set():
             try:
                 payload["is_retry"] = not payload["is_retry"]
+                start_time = time.time()
                 resp = session.post(API_URL, json=payload, timeout=2)
+                latency = (time.time() - start_time) * 1000
                 
                 with stats_lock:
                     stats['total'] += 1
+                    
+                    # Handle rate limiting
+                    if resp.status_code == 429:
+                        stats['rate_limited'] += 1
+                        stats['errors'] += 1
+                        # Exponential backoff for this thread
+                        time.sleep(random.uniform(0.5, 2.0))
+                        continue
+                    
                     if resp.status_code == 200:
                         data = resp.json()
                         code = data.get('code', -1)
@@ -564,17 +703,30 @@ def run_attack(console: Console, target_hour: int = 17, threads: int = 100, imme
                             stats['code_0'] += 1
                             if result == 1:
                                 stats['winner'] = {'thread': thread_id, 'data': data}
+                                logger.info(f"SUCCESS! Thread-{thread_id} acquired unlock ticket")
                                 stop_event.set()
                         elif code == 3 or result == 3:
                             stats['code_3'] += 1
                         elif code == 6 or result == 6:
                             stats['code_6'] += 1
+                        elif code == 401:
+                            stats['errors'] += 1
+                            logger.warning(f"Auth error from thread-{thread_id}")
                     else:
                         stats['errors'] += 1
-            except:
+                        if resp.status_code >= 500:
+                            logger.warning(f"Server error {resp.status_code}")
+                            
+            except requests.exceptions.Timeout:
                 with stats_lock:
                     stats['errors'] += 1
-            time.sleep(0.001)
+            except Exception as e:
+                with stats_lock:
+                    stats['errors'] += 1
+                logger.error(f"Thread-{thread_id} error: {e}")
+            
+            # Jitter: random delay between 0.5ms and 3ms
+            time.sleep(random.uniform(0.0005, 0.003))
     
     # Target time
     now = datetime.now()
@@ -586,7 +738,6 @@ def run_attack(console: Console, target_hour: int = 17, threads: int = 100, imme
         if target_time <= now:
             target_time += timedelta(days=1)
         launch_time = target_time - timedelta(seconds=1.5)
-        
     
     # Show countdown
     clear_screen()
@@ -642,19 +793,43 @@ def run_attack(console: Console, target_hour: int = 17, threads: int = 100, imme
     
     # Final result
     console.print()
+    elapsed = (datetime.now() - start_time).total_seconds()
+    
     if stats.get('winner'):
+        winner_data = stats['winner']['data']
+        deadline = winner_data.get('data', {}).get('deadline_format', 'Unknown')
+        
+        # Save ticket to file
+        saved = save_unlock_ticket(winner_data, stats, elapsed)
+        
+        # Send desktop notification
+        send_notification(
+            "XBLBSMA - Unlock Acquired! 🔓",
+            f"Bootloader unlock ticket acquired! Deadline: {deadline}",
+            "lock-open"
+        )
+        
+        # Log success
+        logger.info(f"Unlock ticket saved. Deadline: {deadline}")
+        
         console.print(Panel(
             f"[bold green]🎉 VICTORY! TICKET ACQUIRED![/]\n\n"
             f"Thread: {stats['winner']['thread']}\n"
             f"Requests: {stats['total']}\n"
-            f"Time: {(datetime.now() - start_time).total_seconds():.3f}s",
+            f"Time: {elapsed:.3f}s\n"
+            f"Deadline: [bold]{deadline}[/]\n"
+            f"{'[green]✓ Ticket saved to unlock_ticket.json[/]' if saved else '[yellow]⚠ Failed to save ticket file[/]'}",
             border_style=theme.SUCCESS,
             title="[bold]SUCCESS[/]"
         ))
     else:
+        logger.info(f"Attack completed without success. Total requests: {stats['total']}")
+        
         console.print(Panel(
             f"Attack completed. Quota may have been full.\n"
-            f"Total requests: {stats['total']}",
+            f"Total requests: {stats['total']}\n"
+            f"Rate limited: {stats.get('rate_limited', 0)}\n"
+            f"See attack.log for details",
             border_style=theme.WARNING,
             title="[bold]Results[/]"
         ))
