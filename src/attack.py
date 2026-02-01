@@ -3,18 +3,30 @@
 Xiaomi Bootloader Unlock API Attacker - "THE SURGEON"
 Direct API injection to bypass UI lag and secure an unlock slot.
 """
+import os
 import time
 import json
+import random
 import requests
 import argparse
 import threading
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 
 # ================= CONFIGURATION =================
-SCRIPT_DIR = Path(__file__).parent.absolute()
-TOKENS_FILE = SCRIPT_DIR.parent / "TOKENS_BACKUP.json"  # In repo root, not src/
+SCRIPT_DIR = Path(__file__).parent.parent.absolute()  # Go to repo root
+TOKENS_FILE = SCRIPT_DIR / "TOKENS_BACKUP.json"
 API_URL = "https://sgp-api.buy.mi.com/bbs/api/global/apply/bl-auth"
+
+# Setup logging
+log_file = SCRIPT_DIR / "attack.log"
+logging.basicConfig(
+    filename=log_file,
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 def load_headers():
     """Load headers from TOKENS_BACKUP.json"""
@@ -48,7 +60,7 @@ HEADERS = load_headers()
 # Attack Settings
 THREADS = 100          # Number of parallel threads
 DURATION = 10          # Seconds to spam (Extended burst)
-REQUEST_DELAY = 0.001  # Delay between requests per thread (1ms)
+REQUEST_DELAY = 0.001  # Base delay between requests per thread (1ms)
 TARGET_HOUR = 17       # 5 PM (Local Time)
 TARGET_MINUTE = 0
 TARGET_SECOND = 0
@@ -67,6 +79,70 @@ class Colors:
 def print_colored(text, color):
     print(f"{color}{text}{Colors.END}")
 
+def send_notification(title: str, message: str, icon: str = "dialog-information"):
+    """Send desktop notification using notify-send (Linux) or osascript (macOS)."""
+    try:
+        if os.name == 'posix':
+            # Try notify-send first (Linux)
+            result = os.system(f'notify-send "{title}" "{message}" --icon={icon} 2>/dev/null')
+            if result != 0:
+                # Fallback to osascript (macOS)
+                os.system(f'osascript -e \'display notification "{message}" with title "{title}"\' 2>/dev/null')
+    except:
+        pass
+
+def save_unlock_ticket(winner_data: dict, stats: dict, elapsed: float):
+    """Save unlock ticket to file for safekeeping."""
+    ticket_file = SCRIPT_DIR / "unlock_ticket.json"
+    
+    ticket = {
+        "timestamp": datetime.now().isoformat(),
+        "elapsed_seconds": round(elapsed, 3),
+        "total_requests": stats['total'],
+        "deadline_timestamp": winner_data.get('data', {}).get('deadline'),
+        "deadline_formatted": winner_data.get('data', {}).get('deadline_format'),
+        "raw_response": winner_data
+    }
+    
+    try:
+        with open(ticket_file, 'w') as f:
+            json.dump(ticket, f, indent=2)
+        return True
+    except Exception as e:
+        logger.error(f"Failed to save ticket: {e}")
+        return False
+
+def health_check():
+    """Quick health check before attack."""
+    if HEADERS is None:
+        print_colored("❌ Cannot start attack - tokens not configured!", Colors.RED)
+        return False
+    
+    print_colored("🔍 Running health check...", Colors.CYAN)
+    
+    try:
+        url = "https://sgp-api.buy.mi.com/bbs/api/global/user/data"
+        resp = requests.get(url, headers=HEADERS, timeout=5)
+        
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get('code') == 0:
+                user = data.get('data', {})
+                username = user.get('user_name', 'Unknown')
+                print_colored(f"✓ Token valid - User: {username}", Colors.GREEN)
+                return True
+            elif data.get('code') == 100004:
+                print_colored("❌ Token expired! Re-extract via mitmproxy.", Colors.RED)
+                return False
+        elif resp.status_code == 401:
+            print_colored("❌ Authentication failed - Token expired!", Colors.RED)
+            return False
+            
+    except Exception as e:
+        print_colored(f"⚠ Health check failed: {e} - will proceed anyway", Colors.YELLOW)
+        
+    return True
+
 def send_request(thread_id, stop_event, stats):
     """Worker function to spam the API."""
     if HEADERS is None:
@@ -79,6 +155,9 @@ def send_request(thread_id, stop_event, stats):
     
     # Toggle 'is_retry' to look slightly organic
     payload = {"is_retry": False}
+    
+    # Random initial delay to stagger thread starts
+    time.sleep(random.uniform(0, 0.1))
 
     while not stop_event.is_set():
         try:
@@ -90,6 +169,14 @@ def send_request(thread_id, stop_event, stats):
             latency = (time.time() - start_req) * 1000
 
             stats['total'] += 1
+            
+            # Handle rate limiting
+            if response.status_code == 429:
+                stats['rate_limited'] += 1
+                stats['errors'] += 1
+                # Exponential backoff
+                time.sleep(random.uniform(0.5, 2.0))
+                continue
             
             # Log significant responses
             if response.status_code == 200:
@@ -110,6 +197,11 @@ def send_request(thread_id, stop_event, stats):
                         # REAL SUCCESS (Result is likely 1 or something else)
                         print_colored(f"\n🎉 [Thread-{thread_id}] JACKPOT! Result: {apply_result}", Colors.GREEN + Colors.BOLD)
                         print(json.dumps(data, indent=2))
+                        
+                        # Save the winning data
+                        stats['winner'] = {'thread': thread_id, 'data': data}
+                        logger.info(f"SUCCESS! Thread-{thread_id} acquired unlock ticket")
+                        
                         stop_event.set() # STOP EVERYTHING WE WON
                         return
                 
@@ -133,8 +225,12 @@ def send_request(thread_id, stop_event, stats):
         except requests.exceptions.RequestException as e:
             stats['errors'] += 1
             # print(f"[Thread-{thread_id}] Error: {e}")
+        except Exception as e:
+            stats['errors'] += 1
+            logger.error(f"Thread-{thread_id} error: {e}")
         
-        time.sleep(REQUEST_DELAY)
+        # Jitter: random delay between 0.5ms and 3ms
+        time.sleep(random.uniform(0.0005, 0.003))
 
 def countdown_and_launch(target_time):
     """Wait for the exact moment (minus buffer)."""
@@ -168,6 +264,10 @@ def main():
     print_colored(" ⚔️  XIAOMI API SURGEON - DIRECT ATTACK  ⚔️", Colors.RED + Colors.BOLD)
     print_colored("="*60, Colors.RED)
     
+    # Health check
+    if not health_check():
+        return
+    
     # Schedule
     now = datetime.now()
     if args.now:
@@ -183,9 +283,10 @@ def main():
 
     # LAUNCH
     print_colored(f"\n🚀 STARTING ATTACK WITH {THREADS} THREADS!", Colors.GREEN + Colors.BOLD)
+    logger.info(f"Attack starting - Target hour: {args.hour}, Threads: {THREADS}")
     
     stop_event = threading.Event()
-    stats = {'total': 0, 'auth_fail': 0, 'quota_full': 0, 'errors': 0}
+    stats = {'total': 0, 'auth_fail': 0, 'quota_full': 0, 'errors': 0, 'rate_limited': 0, 'winner': None}
     threads = []
 
     # Start threads
@@ -201,19 +302,50 @@ def main():
         while time.time() - start_attack < DURATION and not stop_event.is_set():
             time.sleep(0.5)
             elapsed = time.time() - start_attack
-            rate = stats['total'] / elapsed
-            print(f"Stats: {stats['total']} Reqs | {rate:.1f} Req/s | Quota: {stats['quota_full']} | Auth: {stats['auth_fail']}", end='\r')
+            rate = stats['total'] / elapsed if elapsed > 0 else 0
+            status_line = f"Stats: {stats['total']} Reqs | {rate:.1f} Req/s | Quota: {stats['quota_full']} | Auth: {stats['auth_fail']}"
+            if stats['rate_limited'] > 0:
+                status_line += f" | 429s: {stats['rate_limited']}"
+            print(status_line, end='\r')
             
     except KeyboardInterrupt:
         print_colored("\n🛑 Manual Stop", Colors.YELLOW)
+        logger.info("Attack manually stopped")
     
     stop_event.set()
+    elapsed = time.time() - start_attack
+    
     print_colored(f"\n\n🏁 Attack Finished.", Colors.CYAN)
     print_colored(f"Total Requests: {stats['total']}", Colors.CYAN)
     print_colored(f"Quota/Limit Hits: {stats['quota_full']}", Colors.YELLOW)
     
+    if stats['rate_limited'] > 0:
+        print_colored(f"Rate Limited (429): {stats['rate_limited']}", Colors.YELLOW)
+    
     if stats['auth_fail'] > 0:
         print_colored(f"⚠️ Auth Failures: {stats['auth_fail']} (Token might be expired!)", Colors.RED)
+    
+    # Handle success
+    if stats.get('winner'):
+        winner_data = stats['winner']['data']
+        deadline = winner_data.get('data', {}).get('deadline_format', 'Unknown')
+        
+        # Save ticket
+        saved = save_unlock_ticket(winner_data, stats, elapsed)
+        
+        # Send notification
+        send_notification(
+            "XBLBSMA - Unlock Acquired! 🔓",
+            f"Bootloader unlock ticket acquired! Deadline: {deadline}",
+            "lock-open"
+        )
+        
+        logger.info(f"Unlock ticket saved. Deadline: {deadline}")
+        
+        print_colored(f"\n✅ Ticket saved to unlock_ticket.json", Colors.GREEN)
+        print_colored(f"📅 Unlock Deadline: {deadline}", Colors.GREEN + Colors.BOLD)
+    else:
+        logger.info(f"Attack completed without success. Total requests: {stats['total']}")
 
 if __name__ == "__main__":
     main()
